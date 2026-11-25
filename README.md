@@ -8,14 +8,14 @@
 
 ```bash
 uv sync --locked
-uv run --locked --env-file .env -- pg-mcp
+uv run pg-mcp
 ```
 
 服务默认监听 `http://127.0.0.1:8765/mcp`。在本地 `.env` 中设置：
 
 | 变量 | 用途 |
 | --- | --- |
-| `ASSETS_DATABASE_URL` | 必填，PostgreSQL URI 或 libpq 连接字符串。 |
+| `ASSETS_DATABASE_URL` | 单实例使用的 PostgreSQL URI 或 libpq 连接字符串。多环境配置见下文。 |
 | `ASSETS_PG_SCHEMA` | 可选，元数据查询范围，以及 SQL 中未限定表名时的默认业务 schema；默认 `public`。 |
 | `PG_MCP_PORT` | 可选，HTTP 端口；默认 `8765`。 |
 
@@ -29,16 +29,16 @@ uv run --locked --env-file .env -- pg-mcp
 
 ### 同时启动两个环境
 
-若 `.env` 使用了 `PG_TEST_DATABASE_URL` 和 `PG_PROD_RO_DATABASE_URL`，在不同终端分别启动并映射到服务读取的 `ASSETS_DATABASE_URL`。例如测试库：
+在项目根目录 `.env` 中分别填写两个只读连接串，例如：
 
-```bash
-PG_MCP_PORT=8765 uv run --locked --env-file .env -- sh -c '
-  export ASSETS_DATABASE_URL="${PG_TEST_DATABASE_URL:?请先配置测试库连接串}"
-  exec pg-mcp
-'
+```dotenv
+PG_TEST_DATABASE_URL=postgresql://test_reader@test.example.test:5432/assets_test
+PG_PROD_RO_DATABASE_URL=postgresql://prod_reader@replica.example.test:5432/assets
 ```
 
-生产只读库使用同样的命令，将端口改为 `8766`，连接串变量改为 `PG_PROD_RO_DATABASE_URL`。模板的 `pg-prod-ro` 默认禁用；确认账号权限和目标库后再启用。**HTTP 服务没有应用层认证，只监听本机，不要代理或转发到其他机器。**
+运行 **`uv run pg-mcp`** 即可。程序读取 `.env`，为每个非空连接串启动独立进程：测试库默认 `8765`，生产只读库默认 `8766`，路径都是 `/mcp`。端口可在 `.env` 用 `PG_TEST_MCP_PORT`、`PG_PROD_RO_MCP_PORT` 修改。按 `Ctrl+C` 一起停止；任一进程异常退出时，另一个也会停止。
+
+仅配置一个环境就只启动该环境；两个变量都为空时回退到 `ASSETS_DATABASE_URL` 和 `PG_MCP_PORT`。如需忽略多环境配置并只启动这个单实例，运行 `uv run pg-mcp --single`。模板中的 `disabled` 仅控制 OpenCode 是否连接，不控制服务是否监听。**HTTP 服务没有应用层认证，只监听本机，不要代理或转发到其他机器。**
 
 ## 工具
 

@@ -16,6 +16,7 @@ from mcp.types import ToolAnnotations
 from psycopg.rows import DictRow, dict_row, tuple_row
 from pydantic import Field
 
+from .launcher import configured_profiles, read_port, run_profiles
 from .sql_validation import validate_select
 
 load_dotenv()
@@ -140,19 +141,23 @@ def query(sql: SQL_TEXT, limit: LIMIT = 100) -> QueryResult:
 
 
 def main() -> None:
-    """默认启动本机 Streamable HTTP 服务，可显式使用 stdio。"""
+    """启动已配置的 HTTP 环境，也可显式启动单实例或 stdio。"""
     parser = argparse.ArgumentParser(prog="pg-mcp")
-    parser.add_argument("--stdio", action="store_true", help="通过标准输入和输出通信")
-    if parser.parse_args().stdio:
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--stdio", action="store_true", help="通过标准输入和输出通信")
+    mode.add_argument("--single", action="store_true", help="仅使用 ASSETS_DATABASE_URL 启动")
+    args = parser.parse_args()
+    if args.stdio:
         mcp.run(transport="stdio")
         return
 
     try:
-        port = int(os.environ.get("PG_MCP_PORT", "8765"))
-    except ValueError:
-        port = 0
-    if not 1 <= port <= 65535:
-        parser.error("PG_MCP_PORT 必须是 1 到 65535 之间的整数")
+        profiles = [] if args.single else configured_profiles()
+        if not profiles:
+            mcp.settings.port = read_port("PG_MCP_PORT", 8765)
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    mcp.settings.port = port
+    if profiles:
+        raise SystemExit(run_profiles(profiles))
     mcp.run(transport="streamable-http")

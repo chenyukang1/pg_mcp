@@ -9,5 +9,5 @@
 ## Runtime and query boundaries
 
 - `pg-mcp` starts unauthenticated Streamable HTTP on loopback; keep it off external interfaces. Explicit `pg-mcp --stdio` keeps stdout reserved for MCP protocol messages.
-- Set `ASSETS_DATABASE_URL` in the MCP process, not the HTTP client. For separate databases, launch separate processes on distinct `PG_MCP_PORT` values. `opencode.jsonc.example` is client-only and does not start HTTP servers; `connected` verifies MCP, not PostgreSQL access.
+- `pg-mcp` loads `.env` and supervises one process per configured `PG_TEST_DATABASE_URL` / `PG_PROD_RO_DATABASE_URL`. `--single` bypasses profile discovery and uses `ASSETS_DATABASE_URL` and `PG_MCP_PORT`. `opencode.jsonc.example` is client-only; `connected` verifies MCP, not PostgreSQL access.
 - Keep both SQL safeguards: `sql_validation.py` checks the PostgreSQL AST, including nested CTEs and locking clauses; `server.py` executes in a read-only transaction and bounds results. `ASSETS_PG_SCHEMA` scopes metadata and sets the default search path, but database grants control access to explicitly qualified tables. A least-privilege role is still required; a read-only transaction cannot rule out external side effects from callable functions. Do not expose raw driver errors or connection strings.
