@@ -19,6 +19,7 @@ class Issue(Enum):
     AUTH_FAILED = ("密码认证失败", "核对当前数据库角色的凭据。", False)
     UNREACHABLE = ("数据库主机或端口不可达", "检查地址、网络和 VPN。", True)
     QUERY_TIMEOUT = ("PostgreSQL 查询超时", "缩小查询范围或减少返回列数。", False)
+    BUSY = ("当前环境并发请求已满", "稍后重试，避免并行重复请求。", True)
     LOCK_TIMEOUT = ("等待数据库锁超时", "稍后再试。", True)
     RESULT_TOO_LARGE = ("单行结果过大", "减少列或在 SQL 中截断大字段。", False)
     DATABASE_ERROR = ("PostgreSQL 查询失败", "请检查连接设置与账号权限。", False)

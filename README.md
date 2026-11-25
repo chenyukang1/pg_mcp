@@ -69,6 +69,8 @@ PG_PROD_RO_EXPECTED_USER=prod_reader
 
 工具调用失败时 MCP 设置 `isError=true`，并在 `structuredContent.error` 和文本 JSON 中返回稳定的 `code`、`message`、`next_action`、`retryable`。例如 `COLUMN_NOT_FOUND` 建议先 `describe_table`，`TABLE_NOT_FOUND` 建议 `search_tables`，`PERMISSION_DENIED` 不应重试。不会回显驱动错误原文或无效参数值。
 
+所有数据库工具共用**当前环境**的并发名额：测试/单实例默认 8，生产默认 2。已满时立即返回 `BUSY`，不排队。整次工具查询（建连、执行、多次游标读取和行编码）的总时限分别默认 10 秒和 5 秒；到时返回 `QUERY_TIMEOUT`、尝试取消数据库操作，等实际工作结束才释放名额。以 `PG_TEST`、`PG_PROD_RO` 或单实例的 `PG_MCP` 为前缀，设置 `_MAX_CONCURRENT`（1–32）和 `_QUERY_TIMEOUT_MS`（1–120000）。数据库的单语句超时仍独立生效。
+
 `query` 使用服务端游标逐行读取，累计行数据的 JSON 达到 128,000 字节且仍有数据时截断。这个预算不是数据库单行大小限制：驱动仍需接收当前行。查询很大的 `text`、`bytea` 或 JSON 字段时，请在 SQL 中只投影需要的部分。
 
 建议先连接测试库或只读副本。为 MCP 使用独立账号，仅授予目标数据库的 `CONNECT`、指定 schema 的 `USAGE`，以及所需表或脱敏视图的 `SELECT`。不要使用应用写库账号。默认 schema 不是授权边界：显式写 `schema.table` 时，能否查询由数据库角色权限决定。

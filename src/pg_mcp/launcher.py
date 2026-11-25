@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 
 from .identity import ExpectedIdentity
+from .limits import Limits
 
 PROFILES = (("pg-test", "PG_TEST", 8765), ("pg-prod-ro", "PG_PROD_RO", 8766))
 
@@ -18,6 +19,7 @@ class Profile:
     port: int
     dsn: str = field(repr=False)
     identity: ExpectedIdentity
+    limits: Limits
 
     def worker_env(self) -> dict[str, str]:
         # 不继承其他环境的 DSN、PGPASSWORD 或任意父进程凭据。
@@ -28,6 +30,8 @@ class Profile:
         return {**env, "ASSETS_DATABASE_URL": self.dsn, "PG_MCP_PORT": str(self.port),
                 "PG_MCP_EXPECTED_DATABASE": self.identity.database,
                 "PG_MCP_EXPECTED_USER": self.identity.user,
+                "PG_MCP_MAX_CONCURRENT": str(self.limits.concurrency),
+                "PG_MCP_QUERY_TIMEOUT_MS": str(self.limits.timeout_ms),
                 "PYTHON_DOTENV_DISABLED": "1"}
 
 
@@ -47,7 +51,8 @@ def configured_profiles() -> list[Profile]:
         dsn = os.environ.get(f"{prefix}_DATABASE_URL", "").strip()
         if dsn:
             identity = ExpectedIdentity.from_env(prefix, required=True)
-            profiles.append(Profile(name, read_port(f"{prefix}_MCP_PORT", default), dsn, identity))
+            profiles.append(Profile(name, read_port(f"{prefix}_MCP_PORT", default), dsn, identity,
+                                    Limits.from_env(prefix)))
     if len({profile.port for profile in profiles}) != len(profiles):
         raise ValueError("PG_TEST_MCP_PORT 和 PG_PROD_RO_MCP_PORT 不能相同")
     return profiles

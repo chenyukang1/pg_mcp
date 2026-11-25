@@ -1,12 +1,14 @@
 """在 MCP 边界输出结构化工具错误；成功结果沿用 FastMCP 自身的输出 schema。"""
 
 import json
+from functools import wraps
 
 from mcp import types
 from mcp.server.fastmcp import FastMCP
 from pydantic import ValidationError
 
 from .errors import Issue, ToolFailure
+from .limits import Governor, Limits
 
 
 def safe_failure(error: Exception) -> ToolFailure:
@@ -25,6 +27,19 @@ def safe_failure(error: Exception) -> ToolFailure:
 
 
 class ReadOnlyMCP(FastMCP):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.governor = Governor(Limits())
+
+    def database_tool(self, fn):
+        @wraps(fn)
+        async def dispatch(*args, **kwargs):
+            return await self.governor.run(fn, *args, **kwargs)
+
+        self.add_tool(dispatch, annotations=types.ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True))
+        return fn
+
     async def call_tool(self, name, arguments):
         try:
             return await super().call_tool(name, arguments)

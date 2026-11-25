@@ -11,7 +11,6 @@ from typing import Annotated, Any, TypedDict
 import psycopg
 from dotenv import load_dotenv
 from mcp.server.fastmcp.exceptions import ToolError
-from mcp.types import ToolAnnotations
 from psycopg.rows import DictRow, dict_row, tuple_row
 from pydantic import Field
 
@@ -21,6 +20,7 @@ from .diagnostics import check_profiles, check_single
 from .errors import Issue, ToolFailure, database_failure
 from .identity import IDENTITY_SQL, ExpectedIdentity
 from .launcher import configured_profiles, read_port, run_profiles
+from .limits import Governor, Limits, current_deadline
 from .protocol import ReadOnlyMCP
 from .sql_validation import validate_select
 
@@ -38,7 +38,6 @@ LIMIT = Annotated[int, Field(ge=1, le=100)]
 OFFSET = Annotated[int, Field(ge=0, le=2_147_483_647)]
 TABLE_NAME = Annotated[str, Field(min_length=1, max_length=63, pattern=r"^[^\x00]+$")]
 SQL_TEXT = Annotated[str, Field(min_length=1, max_length=16_000)]
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 MAX_RESULT_BYTES = 128_000
 ROW_ENCODER = json.JSONEncoder(default=str, ensure_ascii=True)
 
@@ -92,7 +91,7 @@ def _query(sql: str, params: tuple[str | int, ...]) -> list[DictRow]:
         return cursor.execute(sql, params).fetchall()
 
 
-@mcp.tool(annotations=READ_ONLY)
+@mcp.database_tool
 def list_tables(limit: LIMIT = 50, offset: OFFSET = 0) -> list[DictRow]:
     """按名称分页列出配置 schema 中当前账号可见的表和视图。"""
     return _query(
@@ -107,21 +106,21 @@ def list_tables(limit: LIMIT = 50, offset: OFFSET = 0) -> list[DictRow]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY)
+@mcp.database_tool
 def search_tables(keyword: Annotated[str, Field(min_length=1, max_length=128)],
                   limit: LIMIT = 50, offset: OFFSET = 0) -> list[DictRow]:
     """在可见表名和表注释中查找关键词（忽略大小写，百分号和下划线按字面匹配）。"""
     return _query(catalog.SEARCH, (_schema(), keyword, keyword, limit, offset))
 
 
-@mcp.tool(annotations=READ_ONLY)
+@mcp.database_tool
 def describe_table(table: TABLE_NAME, limit: LIMIT = 50, offset: OFFSET = 0) -> catalog.TableDetails:
     """查看列、默认值、主键、唯一约束和索引；按原样传入表名。各列表独立分页。"""
     with _read_connection() as conn:
         return catalog.describe(conn, _schema(), table, limit, offset)
 
 
-@mcp.tool(annotations=READ_ONLY)
+@mcp.database_tool
 def query(sql: SQL_TEXT, limit: LIMIT = 100) -> QueryResult:
     """运行单条只读 SELECT，默认最多返回 100 行。需要稳定顺序时请写 ORDER BY。"""
     validate_select(sql)
@@ -135,8 +134,11 @@ def query(sql: SQL_TEXT, limit: LIMIT = 100) -> QueryResult:
             columns = [column.name for column in cursor.description or ()]
             rows = []
             bytes_left = MAX_RESULT_BYTES
+            deadline = current_deadline.get()
             # 服务端游标逐行取。多看一行以区分刚好读完和截断。
             while (row := cursor.fetchone()) is not None:
+                if deadline:
+                    deadline.check()
                 if len(rows) == limit:
                     return {"columns": columns, "rows": rows, "truncated": True}
                 encoded = _encode_within_budget(row, bytes_left)
@@ -166,6 +168,7 @@ def main() -> None:
         profiles = [] if args.single or args.stdio else configured_profiles()
         if not profiles:
             expected = ExpectedIdentity.from_env("PG_MCP")
+            mcp.governor = Governor(Limits.from_env("PG_MCP"))
             if not args.stdio:
                 mcp.settings.port = read_port("PG_MCP_PORT", 8765)
     except ValueError as exc:
