@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "pg-test": {
+        "type": "local",
+        "command": ["uv", "run", "--project", "${your_work_path}", "--locked", "pg-mcp"],
+        "environment": {
+          "ASSETS_DATABASE_URL": "{env:PG_TEST_DATABASE_URL}"
+        }
+      },
+      "pg-prod-ro": {
+        "type": "local",
+        "command": ["uv", "run", "--project", "${your_work_path}", "--locked", "pg-mcp"],
+        "environment": {
+          "ASSETS_DATABASE_URL": "{env:PG_PROD_RO_DATABASE_URL}"
+        },
+        "disabled": true
+      }
+    }
+  }
+}
