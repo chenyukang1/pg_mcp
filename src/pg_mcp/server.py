@@ -16,6 +16,7 @@ from mcp.types import ToolAnnotations
 from psycopg.rows import DictRow, dict_row, tuple_row
 from pydantic import Field
 
+from . import catalog
 from .database import connect_readonly, error_hint
 from .diagnostics import check_profiles, check_single
 from .identity import IDENTITY_SQL, ExpectedIdentity
@@ -108,19 +109,17 @@ def list_tables(limit: LIMIT = 50, offset: OFFSET = 0) -> list[DictRow]:
 
 
 @mcp.tool(annotations=READ_ONLY)
-def describe_table(table: TABLE_NAME, limit: LIMIT = 50, offset: OFFSET = 0) -> list[DictRow]:
-    """按字段顺序分页查看表或视图的名称、类型和可空性；表名区分大小写。"""
-    return _query(
-        """
-        SELECT column_name, data_type, udt_schema, udt_name, is_nullable,
-               ordinal_position
-        FROM information_schema.columns
-        WHERE table_schema = %s AND table_name = %s
-        ORDER BY ordinal_position
-        LIMIT %s OFFSET %s
-        """,
-        (_schema(), table, limit, offset),
-    )
+def search_tables(keyword: Annotated[str, Field(min_length=1, max_length=128)],
+                  limit: LIMIT = 50, offset: OFFSET = 0) -> list[DictRow]:
+    """在可见表名和表注释中查找关键词（忽略大小写，百分号和下划线按字面匹配）。"""
+    return _query(catalog.SEARCH, (_schema(), keyword, keyword, limit, offset))
+
+
+@mcp.tool(annotations=READ_ONLY)
+def describe_table(table: TABLE_NAME, limit: LIMIT = 50, offset: OFFSET = 0) -> catalog.TableDetails:
+    """查看列、默认值、主键、唯一约束和索引；按原样传入表名。各列表独立分页。"""
+    with _read_connection() as conn:
+        return catalog.describe(conn, _schema(), table, limit, offset)
 
 
 @mcp.tool(annotations=READ_ONLY)

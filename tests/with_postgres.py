@@ -38,6 +38,9 @@ def main() -> int:
                     admin.execute(psycopg.sql.SQL("CREATE ROLE {} LOGIN").format(psycopg.sql.Identifier(role)))
                     admin.execute(psycopg.sql.SQL("CREATE DATABASE {}").format(psycopg.sql.Identifier(database)))
                     env[key] = make_conninfo(host=tmp, port=5432, dbname=database, user=role)
+            with psycopg.connect(**{**default, "dbname": "first_db"}) as admin:
+                admin.execute((Path(__file__).with_name("catalog_fixture.sql")).read_text())
+            env["PG_MCP_CATALOG_FIXTURE"] = "1"
             return subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                                    "-v", *sys.argv[1:]], env=env).returncode
         finally:

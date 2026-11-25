@@ -55,10 +55,13 @@ PG_PROD_RO_EXPECTED_USER=prod_reader
 | 工具 | 参数 | 返回 |
 | --- | --- | --- |
 | `list_tables` | `limit`、`offset` | 表名、对象类型。 |
-| `describe_table` | `table`、`limit`、`offset` | 列名、类型、可空性和列顺序。表名按原样匹配，不加 schema 前缀。 |
+| `search_tables` | `keyword`、`limit`、`offset` | 在配置的 schema 中按表名或注释搜索；大小写不敏感，`%`、`_` 按字面匹配。 |
+| `describe_table` | `table`、`limit`、`offset` | 对象包含 `columns`（含默认值、注释、自增和生成列）、`primary_key`、`unique_constraints` 和 `indexes`（含定义、部分索引条件）。表名按原样匹配，不加 schema 前缀。 |
 | `query` | `sql`、`limit` | `columns`、按列顺序排列的 `rows`，以及是否截断的 `truncated`。 |
 
 `query` 默认返回 100 行，元数据工具默认返回 50 条，各工具最多返回 100 条。元数据工具的 `offset` 从 0 开始；元数据来自 `information_schema`，不覆盖 PostgreSQL 特有的所有对象类型（例如物化视图）。
+
+旧客户端请从 `describe_table` 返回对象的 `columns` 读取原字段列表。列、唯一约束和索引各自按同一组 `limit/offset` 分页；任一列表有后续页时 `truncated=true`。只有列级权限时，仍可查看可见列，`table_details_visible=false`，不返回可能涉及其他列的键或索引定义。
 
 例如，在 OpenCode 中请求「用 `pg-mcp` 执行 `SELECT id, status FROM orders ORDER BY id DESC LIMIT 10`」，将表名和列名换成实际名称。`query` 支持 `JOIN`、聚合和只读 `WITH`，拒绝多语句、写入型 CTE、`SELECT INTO` 和 `FOR UPDATE/SHARE` 等锁行语句。查询工具还限制返回的行数据大小，超出时截断；如果首行就超限，需要减少列或截短大字段。`numeric` 等不能直接用 JSON 表示的类型会转为字符串。
 

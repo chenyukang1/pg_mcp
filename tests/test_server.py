@@ -52,12 +52,12 @@ class QueryTests(unittest.TestCase):
         self.assertIn("FROM information_schema.tables", sql)
         self.assertEqual(params, ("reporting", 5, 10))
 
-        table = "Customer's Name"
-        server.describe_table(table)
+        keyword = "Customer's Name"
+        server.search_tables(keyword)
         sql, params = query.call_args.args
-        self.assertIn("FROM information_schema.columns", sql)
-        self.assertNotIn(table, sql)
-        self.assertEqual(params, ("reporting", table, 50, 0))
+        self.assertIn("FROM information_schema.tables", sql)
+        self.assertNotIn(keyword, sql)
+        self.assertEqual(params, ("reporting", keyword, keyword, 50, 0))
 
     @patch.dict("os.environ", {"ASSETS_DATABASE_URL": "dbname=test"})
     @patch("pg_mcp.server.psycopg.connect")
@@ -159,7 +159,7 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                 await session.initialize()
                 tools = (await session.list_tools()).tools
                 self.assertEqual(
-                    {tool.name for tool in tools}, {"list_tables", "describe_table", "query"}
+                    {tool.name for tool in tools}, {"list_tables", "search_tables", "describe_table", "query"}
                 )
                 self.assertTrue(all(tool.annotations.readOnlyHint for tool in tools))
 
