@@ -1,0 +1,22 @@
+[project]
+name = "pg-mcp"
+version = "0.1.0"
+description = "Read-only PostgreSQL queries over MCP"
+readme = "README.md"
+authors = [
+    { name = "tony", email = "cyk4347@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "mcp>=1.26,<2",
+    "pglast>=7,<9",
+    "psycopg[binary]>=3.3,<4",
+    "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+pg-mcp = "pg_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"

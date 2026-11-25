@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Database connection files and credentials
+.env
+.env.*
+!.env.example
+.pgpass
+.pgpass.*
+.pg_service.conf
+
+# Local OpenCode configuration may contain machine-specific paths
+/opencode.json
+/opencode.jsonc
+/.opencode/opencode.json
+/.opencode/opencode.jsonc
+
+# Local logs and macOS metadata
+*.log
+.DS_Store
