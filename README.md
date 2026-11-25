@@ -23,6 +23,8 @@ uv run pg-mcp
 
 ## 客户端接入
 
+启动前运行 `uv run pg-mcp --check`，逐个检查已配置环境的本机端口能否监听，并查询实际数据库名、当前用户和事务只读状态。已运行实例占用端口会导致预检失败；这个命令不会启动或停止服务。单实例用 `--single --check`。所有检查通过返回 0，否则返回非零。`transaction_read_only=on` 表示本次事务只读，不代表账号本身没有写权限。
+
 任何支持 Streamable HTTP 的 MCP 客户端都可以连接 `http://127.0.0.1:8765/mcp`。OpenCode V2 用户可将 `opencode.jsonc.example` 中的 `mcp.servers` 条目合并到使用 MCP 的项目配置；已有同名 `local` 条目应整个替换为 `remote` 条目。
 
 连接后执行 `SELECT current_database(), current_user;` 验证数据库和账号。`connected` 只表示 MCP 握手成功，不代表数据库可用。只支持 stdio 的客户端，可在原有 `pg-mcp` 启动命令末尾加 `--stdio`，由客户端启动。

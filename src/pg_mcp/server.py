@@ -16,6 +16,8 @@ from mcp.types import ToolAnnotations
 from psycopg.rows import DictRow, dict_row, tuple_row
 from pydantic import Field
 
+from .database import connect_readonly, error_hint
+from .diagnostics import check_profiles, check_single
 from .launcher import configured_profiles, read_port, run_profiles
 from .sql_validation import validate_select
 
@@ -54,12 +56,7 @@ def _read_connection() -> Iterator[psycopg.Connection]:
         raise ToolError("未配置 ASSETS_DATABASE_URL，请检查 MCP 进程的环境变量。")
 
     try:
-        with psycopg.connect(
-            dsn,
-            connect_timeout=5,
-            options=("-c statement_timeout=3000 -c lock_timeout=1000 -c standard_conforming_strings=on"),
-        ) as conn:
-            conn.read_only = True
+        with connect_readonly(dsn) as conn:
             yield conn
     except psycopg.errors.QueryCanceled:
         raise ToolError("PostgreSQL 查询超时。") from None
@@ -70,7 +67,7 @@ def _read_connection() -> Iterator[psycopg.Connection]:
             type(exc).__name__,
             exc.sqlstate or "-",
         )
-        raise ToolError("PostgreSQL 查询失败，请检查连接设置与账号权限。") from None
+        raise ToolError("PostgreSQL 查询失败：" + error_hint(exc)) from None
 
 
 def _query(sql: str, params: tuple[str | int, ...]) -> list[DictRow]:
@@ -143,7 +140,10 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stdio", action="store_true", help="通过标准输入和输出通信")
     mode.add_argument("--single", action="store_true", help="仅使用 ASSETS_DATABASE_URL 启动")
+    parser.add_argument("--check", action="store_true", help="预检端口与只读数据库连接，然后退出")
     args = parser.parse_args()
+    if args.check and args.stdio:
+        parser.error("--check 不适用于 --stdio")
     load_dotenv(".env")
     if not os.environ.get("ASSETS_DATABASE_URL"):
         os.environ["ASSETS_DATABASE_URL"] = os.environ.get("PG_TEST_DATABASE_URL", "")
@@ -158,6 +158,11 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
+    if args.check:
+        ok = check_profiles(profiles) if profiles else check_single(
+            mcp.settings.port, os.environ["ASSETS_DATABASE_URL"]
+        )
+        raise SystemExit(0 if ok else 1)
     if profiles:
         raise SystemExit(run_profiles(profiles))
     mcp.run(transport="streamable-http")
