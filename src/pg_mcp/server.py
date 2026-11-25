@@ -10,21 +10,22 @@ from typing import Annotated, Any, TypedDict
 
 import psycopg
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from psycopg.rows import DictRow, dict_row, tuple_row
 from pydantic import Field
 
 from . import catalog
-from .database import connect_readonly, error_hint
+from .database import connect_readonly
 from .diagnostics import check_profiles, check_single
+from .errors import Issue, ToolFailure, database_failure
 from .identity import IDENTITY_SQL, ExpectedIdentity
 from .launcher import configured_profiles, read_port, run_profiles
+from .protocol import ReadOnlyMCP
 from .sql_validation import validate_select
 
 logger = logging.getLogger(__name__)
-mcp = FastMCP(
+mcp = ReadOnlyMCP(
     "pg-mcp",
     instructions="可查询表结构和数据；query 只接受单条只读 SELECT。请只查询必要的列和行。",
     host="127.0.0.1",
@@ -69,15 +70,13 @@ def _schema() -> str:
 def _read_connection() -> Iterator[psycopg.Connection]:
     dsn = os.environ.get("ASSETS_DATABASE_URL", "").strip()
     if not dsn:
-        raise ToolError("未配置 ASSETS_DATABASE_URL，请检查 MCP 进程的环境变量。")
+        raise ToolFailure(Issue.MISSING_DSN)
 
     try:
         with connect_readonly(dsn) as conn:
             if expected := ExpectedIdentity.from_env("PG_MCP"):
                 expected.verify(conn.execute(IDENTITY_SQL).fetchone())
             yield conn
-    except psycopg.errors.QueryCanceled:
-        raise ToolError("PostgreSQL 查询超时。") from None
     except psycopg.Error as exc:
         # 不记录驱动异常正文，其中可能包含连接信息。
         logger.warning(
@@ -85,7 +84,7 @@ def _read_connection() -> Iterator[psycopg.Connection]:
             type(exc).__name__,
             exc.sqlstate or "-",
         )
-        raise ToolError("PostgreSQL 查询失败：" + error_hint(exc)) from None
+        raise database_failure(exc) from None
 
 
 def _query(sql: str, params: tuple[str | int, ...]) -> list[DictRow]:
@@ -143,7 +142,7 @@ def query(sql: SQL_TEXT, limit: LIMIT = 100) -> QueryResult:
                 encoded = _encode_within_budget(row, bytes_left)
                 if encoded is None:
                     if not rows:
-                        raise ToolError("单行结果过大，请减少列或在 SQL 中截断大字段。")
+                        raise ToolFailure(Issue.RESULT_TOO_LARGE)
                     return {"columns": columns, "rows": rows, "truncated": True}
                 bytes_left -= len(encoded)
                 rows.append(json.loads(encoded, parse_constant=str))

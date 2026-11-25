@@ -7,7 +7,8 @@ import sys
 
 import psycopg
 
-from .database import connect_readonly, error_hint
+from .database import connect_readonly
+from .errors import database_failure
 from .identity import IDENTITY_SQL, ExpectedIdentity, IdentityMismatch
 from .launcher import Profile
 
@@ -28,7 +29,8 @@ def check_single(port: int, dsn: str) -> bool:
         with connect_readonly(dsn) as conn:
             db, user, readonly = conn.execute(IDENTITY_SQL).fetchone()
     except psycopg.Error as exc:
-        print("数据库：" + error_hint(exc))
+        failure = database_failure(exc)
+        print(f"数据库：{failure}。{failure.fields()['next_action']}")
         return False
     print(json.dumps({"database": db, "user": user, "transaction_read_only": readonly}))
     if expected := ExpectedIdentity.from_env("PG_MCP"):

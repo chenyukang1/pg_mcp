@@ -3,8 +3,9 @@
 from typing import TypedDict
 
 import psycopg
-from mcp.server.fastmcp.exceptions import ToolError
 from psycopg.rows import DictRow, dict_row
+
+from .errors import Issue, ToolFailure
 
 
 class TableDetails(TypedDict):
@@ -68,7 +69,7 @@ def describe(conn: psycopg.Connection, schema: str, table: str, limit: int, offs
                 {TABLES} AND t.table_name = %s""", (schema, table)
         ).fetchone()
         if target is None:
-            raise ToolError("表不存在或对当前账号不可见，请用 search_tables 查找。")
+            raise ToolFailure(Issue.TABLE_NOT_FOUND)
         oid = target["oid"]
         cols = cur.execute(COLUMNS, (oid, schema, table, limit + 1, offset)).fetchall()
         pk, uniques, indexes = None, [], []

@@ -3,7 +3,7 @@
 import os
 from dataclasses import dataclass
 
-from mcp.server.fastmcp.exceptions import ToolError
+from .errors import Issue, ToolFailure
 
 IDENTITY_SQL = (
     "SELECT pg_catalog.current_database(), current_user, "
@@ -11,9 +11,9 @@ IDENTITY_SQL = (
 )
 
 
-class IdentityMismatch(ToolError):
+class IdentityMismatch(ToolFailure):
     def __init__(self) -> None:
-        super().__init__("IDENTITY_MISMATCH：数据库、用户或事务只读状态与预期不符，请核对环境配置。")
+        super().__init__(Issue.IDENTITY_MISMATCH)
 
 
 @dataclass(frozen=True)
