@@ -37,12 +37,26 @@ TABLE_NAME = Annotated[str, Field(min_length=1, max_length=63, pattern=r"^[^\x00
 SQL_TEXT = Annotated[str, Field(min_length=1, max_length=16_000)]
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 MAX_RESULT_BYTES = 128_000
+ROW_ENCODER = json.JSONEncoder(default=str, ensure_ascii=True)
 
 
 class QueryResult(TypedDict):
     columns: list[str]
     rows: list[list[Any]]
     truncated: bool
+
+
+def _encode_within_budget(row: tuple, remaining: int) -> str | None:
+    # 常见超大 text/bytea 字段不再额外分配完整 JSON 字符串。
+    if any(isinstance(value, (str, bytes)) and len(value) > remaining for value in row):
+        return None
+    chunks = []
+    for chunk in ROW_ENCODER.iterencode(row):
+        remaining -= len(chunk)  # ensure_ascii=True，每个字符占一个字节。
+        if remaining < 0:
+            return None
+        chunks.append(chunk)
+    return "".join(chunks)
 
 
 def _schema() -> str:
@@ -120,16 +134,16 @@ def query(sql: SQL_TEXT, limit: LIMIT = 100) -> QueryResult:
             columns = [column.name for column in cursor.description or ()]
             rows = []
             bytes_left = MAX_RESULT_BYTES
-            for row in cursor.fetchmany(limit + 1):
+            # 服务端游标逐行取。多看一行以区分刚好读完和截断。
+            while (row := cursor.fetchone()) is not None:
                 if len(rows) == limit:
                     return {"columns": columns, "rows": rows, "truncated": True}
-                # 保留列顺序和重复列名；Decimal 等非 JSON 类型用字符串表示。
-                encoded = json.dumps(row, default=str)
-                bytes_left -= len(encoded)  # 默认 ensure_ascii=True，每字符一字节。
-                if bytes_left < 0:
+                encoded = _encode_within_budget(row, bytes_left)
+                if encoded is None:
                     if not rows:
                         raise ToolError("单行结果过大，请减少列或在 SQL 中截断大字段。")
                     return {"columns": columns, "rows": rows, "truncated": True}
+                bytes_left -= len(encoded)
                 rows.append(json.loads(encoded, parse_constant=str))
             return {"columns": columns, "rows": rows, "truncated": False}
 

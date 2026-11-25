@@ -98,7 +98,7 @@ class QueryTests(unittest.TestCase):
         conn = connect.return_value.__enter__.return_value
         cursor = conn.cursor.return_value.__enter__.return_value
         cursor.description = [SimpleNamespace(name="id"), SimpleNamespace(name="id")]
-        cursor.fetchmany.return_value = [(Decimal("1.20"), 2), (3, 4)]
+        cursor.fetchone.side_effect = [(Decimal("1.20"), 2), (3, 4)]
 
         result = server.query("SELECT 1.20 AS id, 2 AS id", limit=1)
 
@@ -106,7 +106,7 @@ class QueryTests(unittest.TestCase):
             result, {"columns": ["id", "id"], "rows": [["1.20", 2]], "truncated": True}
         )
         self.assertTrue(conn.read_only)
-        cursor.fetchmany.assert_called_once_with(2)
+        self.assertEqual(cursor.fetchone.call_count, 2)
 
     @patch.dict("os.environ", {"ASSETS_DATABASE_URL": "dbname=test"})
     @patch("pg_mcp.server.MAX_RESULT_BYTES", 10)
@@ -114,12 +114,23 @@ class QueryTests(unittest.TestCase):
     def test_data_query_caps_output_size(self, connect):
         conn = connect.return_value.__enter__.return_value
         cursor = conn.cursor.return_value.__enter__.return_value
-        cursor.fetchmany.return_value = [(1,), ("long result",)]
+        cursor.fetchone.side_effect = [(1,), ("long result",), AssertionError("截断后不应再取行")]
 
         self.assertTrue(server.query("SELECT 1")["truncated"])
-        cursor.fetchmany.return_value = [("long result",)]
+        cursor.fetchone.side_effect = [("long result",)]
         with self.assertRaisesRegex(ToolError, "单行结果过大"):
             server.query("SELECT 1")
+
+    @patch.dict("os.environ", {"ASSETS_DATABASE_URL": "dbname=test"})
+    @patch("pg_mcp.server.psycopg.connect")
+    def test_exact_row_and_byte_limits_do_not_mark_complete_result_truncated(self, connect):
+        cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        # ensure_ascii 将一个中文字符编码为六个 ASCII 字节，加括号和引号共十字节。
+        with patch.object(server, "MAX_RESULT_BYTES", 10):
+            cursor.fetchone.side_effect = [("中",), None]
+            result = server.query("SELECT '中'", limit=1)
+        self.assertEqual(result["rows"], [["中"]])
+        self.assertFalse(result["truncated"])
 
 
 class PostgreSQLTests(unittest.TestCase):

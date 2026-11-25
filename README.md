@@ -58,6 +58,8 @@ PG_PROD_RO_DATABASE_URL=postgresql://prod_reader@replica.example.test:5432/asset
 
 ## 权限和数据安全
 
+`query` 使用服务端游标逐行读取，累计行数据的 JSON 达到 128,000 字节且仍有数据时截断。这个预算不是数据库单行大小限制：驱动仍需接收当前行。查询很大的 `text`、`bytea` 或 JSON 字段时，请在 SQL 中只投影需要的部分。
+
 建议先连接测试库或只读副本。为 MCP 使用独立账号，仅授予目标数据库的 `CONNECT`、指定 schema 的 `USAGE`，以及所需表或脱敏视图的 `SELECT`。不要使用应用写库账号。默认 schema 不是授权边界：显式写 `schema.table` 时，能否查询由数据库角色权限决定。
 
 SQL 先经过 PostgreSQL 语法树检查，再在只读事务中执行。服务设置了 5 秒连接超时、3 秒语句超时和 1 秒锁等待超时。只读事务不能阻止所有 `SELECT` 函数的外部副作用；不要让账号通过角色继承或 `PUBLIC` 调用有副作用的自定义函数或扩展。查询结果会进入模型上下文，不要授权敏感原始数据。
