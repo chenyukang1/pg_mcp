@@ -19,9 +19,6 @@ from pydantic import Field
 from .launcher import configured_profiles, read_port, run_profiles
 from .sql_validation import validate_select
 
-load_dotenv()
-
-
 logger = logging.getLogger(__name__)
 mcp = FastMCP(
     "pg-mcp",
@@ -147,6 +144,9 @@ def main() -> None:
     mode.add_argument("--stdio", action="store_true", help="通过标准输入和输出通信")
     mode.add_argument("--single", action="store_true", help="仅使用 ASSETS_DATABASE_URL 启动")
     args = parser.parse_args()
+    load_dotenv(".env")
+    if not os.environ.get("ASSETS_DATABASE_URL"):
+        os.environ["ASSETS_DATABASE_URL"] = os.environ.get("PG_TEST_DATABASE_URL", "")
     if args.stdio:
         mcp.run(transport="stdio")
         return

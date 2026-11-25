@@ -141,7 +141,7 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
         process = StdioServerParameters(
             command=sys.executable,
             args=["-c", "from pg_mcp import main; main()", "--stdio"],
-            env={"ASSETS_DATABASE_URL": ""},
+            env={"ASSETS_DATABASE_URL": "", "PYTHON_DOTENV_DISABLED": "1"},
         )
         async with stdio_client(process) as (reader, writer):
             async with ClientSession(reader, writer) as session:

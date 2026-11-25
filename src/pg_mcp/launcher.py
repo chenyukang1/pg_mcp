@@ -5,8 +5,25 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 
-PROFILES = (("PG_TEST", 8765), ("PG_PROD_RO", 8766))
+PROFILES = (("pg-test", "PG_TEST", 8765), ("pg-prod-ro", "PG_PROD_RO", 8766))
+
+
+@dataclass(frozen=True)
+class Profile:
+    name: str
+    port: int
+    dsn: str = field(repr=False)
+
+    def worker_env(self) -> dict[str, str]:
+        # 不继承其他环境的 DSN、PGPASSWORD 或任意父进程凭据。
+        shared = ("PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR",
+                  "SYSTEMROOT", "USERPROFILE", "APPDATA", "ASSETS_PG_SCHEMA",
+                  "PGPASSFILE", "PGSSLROOTCERT", "PGSERVICEFILE")
+        env = {key: os.environ[key] for key in shared if key in os.environ}
+        return {**env, "ASSETS_DATABASE_URL": self.dsn, "PG_MCP_PORT": str(self.port),
+                "PYTHON_DOTENV_DISABLED": "1"}
 
 
 def read_port(name: str, default: int) -> int:
@@ -19,13 +36,13 @@ def read_port(name: str, default: int) -> int:
     return port
 
 
-def configured_profiles() -> list[tuple[int, str]]:
+def configured_profiles() -> list[Profile]:
     profiles = []
-    for prefix, default in PROFILES:
+    for name, prefix, default in PROFILES:
         dsn = os.environ.get(f"{prefix}_DATABASE_URL", "").strip()
         if dsn:
-            profiles.append((read_port(f"{prefix}_MCP_PORT", default), dsn))
-    if len({port for port, _ in profiles}) != len(profiles):
+            profiles.append(Profile(name, read_port(f"{prefix}_MCP_PORT", default), dsn))
+    if len({profile.port for profile in profiles}) != len(profiles):
         raise ValueError("PG_TEST_MCP_PORT 和 PG_PROD_RO_MCP_PORT 不能相同")
     return profiles
 
@@ -34,16 +51,16 @@ def _stop_on_term(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
-def run_profiles(profiles: list[tuple[int, str]]) -> int:
+def run_profiles(profiles: list[Profile]) -> int:
     """任一工作进程退出时停止其他进程，避免留下部分服务。"""
     children = []
     previous_handler = signal.signal(signal.SIGTERM, _stop_on_term)
     try:
-        for port, dsn in profiles:
+        for profile in profiles:
             children.append(
                 subprocess.Popen(
                     [sys.executable, "-m", "pg_mcp", "--single"],
-                    env={**os.environ, "ASSETS_DATABASE_URL": dsn, "PG_MCP_PORT": str(port)},
+                    env=profile.worker_env(),
                     start_new_session=True,
                 )
             )

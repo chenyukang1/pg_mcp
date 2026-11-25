@@ -40,6 +40,8 @@ PG_PROD_RO_DATABASE_URL=postgresql://prod_reader@replica.example.test:5432/asset
 
 仅配置一个环境就只启动该环境；两个变量都为空时回退到 `ASSETS_DATABASE_URL` 和 `PG_MCP_PORT`。如需忽略多环境配置并只启动这个单实例，运行 `uv run pg-mcp --single`。模板中的 `disabled` 仅控制 OpenCode 是否连接，不控制服务是否监听。**HTTP 服务没有应用层认证，只监听本机，不要代理或转发到其他机器。**
 
+`--single` 和 `--stdio` 优先使用显式的 `ASSETS_DATABASE_URL`，否则只回退到测试库。使用旧模板时，请将其中指向生产库的 `ASSETS_DATABASE_URL` 改成测试连接串或删除。多环境工作进程不加载 `.env`，只接收分配给自己的连接串。密码和 TLS 参数可以按环境在 libpq 连接配置中指定；工作进程不会继承通用 `PGPASSWORD`。
+
 ## 工具
 
 | 工具 | 参数 | 返回 |
