@@ -1,6 +1,6 @@
 # PostgreSQL MCP
 
-本地 stdio MCP 服务，可查看 PostgreSQL 表结构，也可用单条只读 `SELECT` 查询实际数据。
+本地 PostgreSQL MCP 服务，默认通过 Streamable HTTP 提供表结构和单条只读 `SELECT` 查询，不依赖 OpenCode 启动。
 
 ## 启动
 
@@ -8,23 +8,37 @@
 
 ```bash
 uv sync --locked
-opencode mcp list
+uv run --locked --env-file .env -- pg-mcp
 ```
 
-项目自带 `opencode.jsonc`，OpenCode V2 会自动加载。启动命令通过 `--project` 指向本项目的绝对路径，避免从其他目录启动时找错 `uv.lock`；如果移动项目，请更新该路径。确保运行 OpenCode 后台服务的进程能读取以下变量：
+服务默认监听 `http://127.0.0.1:8765/mcp`。在本地 `.env` 中设置：
 
 | 变量 | 用途 |
 | --- | --- |
 | `ASSETS_DATABASE_URL` | 必填，PostgreSQL URI 或 libpq 连接字符串。 |
 | `ASSETS_PG_SCHEMA` | 可选，元数据查询范围，以及 SQL 中未限定表名时的默认业务 schema；默认 `public`。 |
+| `PG_MCP_PORT` | 可选，HTTP 端口；默认 `8765`。 |
 
-连接串示意（不含密码）：`postgresql://mcp_reader@db.example.test:5432/assets_test?sslmode=verify-full`。可以通过受保护的 `~/.pgpass` 提供数据库密码，文件权限设为 `0600`。不要将真实密码写进配置、命令参数或聊天。项目不会自动读取 `.env`。如果 OpenCode 后台服务已在运行，仅在另一个终端执行 `export` 不会改变后台进程的环境。若后台进程的 `PATH` 找不到 `uv`，在配置中将 `uv` 换成 `command -v uv` 查到的绝对路径。
+连接串示意（不含密码）：`postgresql://mcp_reader@db.example.test:5432/assets_test?sslmode=verify-full`。可以通过受保护的 `~/.pgpass` 提供数据库密码，文件权限设为 `0600`。不要将真实密码写进配置、命令参数或聊天。显式使用 `--env-file` 可以固定读取哪个文件；如果已通过进程环境设置变量，也可以省略该参数直接运行。
 
-在 OpenCode 中用 `/mcps` 检查状态，然后请求「用 `pg-mcp` 列出前 5 张表」。`connected` 只表示 MCP 服务握手成功，工具成功返回才表示数据库连接可用；空列表表示当前账号没有看到符合条件的对象，也可能是 schema 配错或分页已到末尾。
+## 客户端接入
 
-## 在其他项目使用
+任何支持 Streamable HTTP 的 MCP 客户端都可以连接 `http://127.0.0.1:8765/mcp`。OpenCode V2 用户可将 `opencode.jsonc.example` 中的 `mcp.servers` 条目合并到使用 MCP 的项目配置；已有同名 `local` 条目应整个替换为 `remote` 条目。
 
-若要在 `qbit-assets` 使用，把本项目 `opencode.jsonc` 中 `mcp.servers.pg-mcp` 的配置条目合并进 `qbit-assets` 的项目配置。保留启动命令中的绝对路径和 `environment` 设置。无需改全局配置，也无需复制 Python 源码。
+连接后执行 `SELECT current_database(), current_user;` 验证数据库和账号。`connected` 只表示 MCP 握手成功，不代表数据库可用。只支持 stdio 的客户端，可在原有 `pg-mcp` 启动命令末尾加 `--stdio`，由客户端启动。
+
+### 同时启动两个环境
+
+若 `.env` 使用了 `PG_TEST_DATABASE_URL` 和 `PG_PROD_RO_DATABASE_URL`，在不同终端分别启动并映射到服务读取的 `ASSETS_DATABASE_URL`。例如测试库：
+
+```bash
+PG_MCP_PORT=8765 uv run --locked --env-file .env -- sh -c '
+  export ASSETS_DATABASE_URL="${PG_TEST_DATABASE_URL:?请先配置测试库连接串}"
+  exec pg-mcp
+'
+```
+
+生产只读库使用同样的命令，将端口改为 `8766`，连接串变量改为 `PG_PROD_RO_DATABASE_URL`。模板的 `pg-prod-ro` 默认禁用；确认账号权限和目标库后再启用。**HTTP 服务没有应用层认证，只监听本机，不要代理或转发到其他机器。**
 
 ## 工具
 
@@ -34,7 +48,7 @@ opencode mcp list
 | `describe_table` | `table`、`limit`、`offset` | 列名、类型、可空性和列顺序。表名按原样匹配，不加 schema 前缀。 |
 | `query` | `sql`、`limit` | `columns`、按列顺序排列的 `rows`，以及是否截断的 `truncated`。 |
 
-各工具默认返回 50 条，最多 100 条。元数据工具的 `offset` 从 0 开始；元数据来自 `information_schema`，不覆盖 PostgreSQL 特有的所有对象类型（例如物化视图）。
+`query` 默认返回 100 行，元数据工具默认返回 50 条，各工具最多返回 100 条。元数据工具的 `offset` 从 0 开始；元数据来自 `information_schema`，不覆盖 PostgreSQL 特有的所有对象类型（例如物化视图）。
 
 例如，在 OpenCode 中请求「用 `pg-mcp` 执行 `SELECT id, status FROM orders ORDER BY id DESC LIMIT 10`」，将表名和列名换成实际名称。`query` 支持 `JOIN`、聚合和只读 `WITH`，拒绝多语句、写入型 CTE、`SELECT INTO` 和 `FOR UPDATE/SHARE` 等锁行语句。查询工具还限制返回的行数据大小，超出时截断；如果首行就超限，需要减少列或截短大字段。`numeric` 等不能直接用 JSON 表示的类型会转为字符串。
 
@@ -50,4 +64,4 @@ SQL 先经过 PostgreSQL 语法树检查，再在只读事务中执行。服务�
 uv run --locked python -m unittest discover -s tests -v
 ```
 
-测试覆盖 SQL 校验、查询限制、错误脱敏，以及 MCP stdio 握手和工具调用。设置独立测试库连接串 `PG_MCP_TEST_DSN` 后，测试还会真实读取 PostgreSQL 系统表，并确认事务处于只读模式；未设置时该项跳过。
+测试覆盖 SQL 校验、查询限制、错误脱敏，以及 HTTP 和 stdio 的 MCP 握手和工具调用。设置独立测试库连接串 `PG_MCP_TEST_DSN` 后，测试还会真实读取 PostgreSQL 系统表，并确认事务处于只读模式；未设置时该项跳过。

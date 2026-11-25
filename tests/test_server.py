@@ -1,4 +1,6 @@
+import asyncio
 import os
+import socket
 import sys
 import unittest
 from decimal import Decimal
@@ -8,6 +10,7 @@ from unittest.mock import patch
 import psycopg
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server.fastmcp.exceptions import ToolError
 
 from pg_mcp import server
@@ -137,7 +140,7 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
     async def test_initialize_discover_and_call_tools_without_database(self):
         process = StdioServerParameters(
             command=sys.executable,
-            args=["-c", "from pg_mcp import main; main()"],
+            args=["-c", "from pg_mcp import main; main()", "--stdio"],
             env={"ASSETS_DATABASE_URL": ""},
         )
         async with stdio_client(process) as (reader, writer):
@@ -163,3 +166,49 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                 rejected = await session.call_tool("query", {"sql": "SELECT 1; DELETE FROM items"})
                 self.assertTrue(rejected.isError)
                 self.assertIn("只允许单条 SELECT", rejected.content[0].text)
+
+
+class HttpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_transport_serves_mcp_over_http(self):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "from pg_mcp import main; main()",
+            env={**os.environ, "PG_MCP_PORT": str(port), "ASSETS_DATABASE_URL": ""},
+        )
+        try:
+            async with asyncio.timeout(10):
+                while True:
+                    if process.returncode is not None:
+                        self.fail(f"HTTP 服务提前退出：{process.returncode}")
+                    try:
+                        _, writer = await asyncio.open_connection("127.0.0.1", port)
+                    except ConnectionRefusedError:
+                        await asyncio.sleep(0.05)
+                    else:
+                        writer.close()
+                        await writer.wait_closed()
+                        break
+
+                async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as (
+                    reader,
+                    writer,
+                    _,
+                ):
+                    async with ClientSession(reader, writer) as session:
+                        await session.initialize()
+                        result = await session.call_tool("query", {"sql": "SELECT 1"})
+                        self.assertTrue(result.isError)
+                        self.assertIn("ASSETS_DATABASE_URL", result.content[0].text)
+        finally:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()

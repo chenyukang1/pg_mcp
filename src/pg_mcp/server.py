@@ -1,5 +1,6 @@
-"""通过 stdio 提供 PostgreSQL 只读查询。"""
+"""通过 MCP 提供 PostgreSQL 只读查询。"""
 
+import argparse
 import json
 import logging
 import os
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     "pg-mcp",
     instructions="可查询表结构和数据；query 只接受单条只读 SELECT。请只查询必要的列和行。",
+    host="127.0.0.1",
+    streamable_http_path="/mcp",
+    stateless_http=True,
+    json_response=True,
 )
 
 LIMIT = Annotated[int, Field(ge=1, le=100)]
@@ -135,5 +140,19 @@ def query(sql: SQL_TEXT, limit: LIMIT = 100) -> QueryResult:
 
 
 def main() -> None:
-    """启动本地 stdio MCP 服务。"""
-    mcp.run(transport="stdio")
+    """默认启动本机 Streamable HTTP 服务，可显式使用 stdio。"""
+    parser = argparse.ArgumentParser(prog="pg-mcp")
+    parser.add_argument("--stdio", action="store_true", help="通过标准输入和输出通信")
+    if parser.parse_args().stdio:
+        mcp.run(transport="stdio")
+        return
+
+    try:
+        port = int(os.environ.get("PG_MCP_PORT", "8765"))
+    except ValueError:
+        port = 0
+    if not 1 <= port <= 65535:
+        parser.error("PG_MCP_PORT 必须是 1 到 65535 之间的整数")
+
+    mcp.settings.port = port
+    mcp.run(transport="streamable-http")
