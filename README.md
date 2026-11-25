@@ -35,7 +35,11 @@ uv run pg-mcp
 
 ```dotenv
 PG_TEST_DATABASE_URL=postgresql://test_reader@test.example.test:5432/assets_test
+PG_TEST_EXPECTED_DATABASE=assets_test
+PG_TEST_EXPECTED_USER=test_reader
 PG_PROD_RO_DATABASE_URL=postgresql://prod_reader@replica.example.test:5432/assets
+PG_PROD_RO_EXPECTED_DATABASE=assets
+PG_PROD_RO_EXPECTED_USER=prod_reader
 ```
 
 运行 **`uv run pg-mcp`** 即可。程序读取 `.env`，为每个非空连接串启动独立进程：测试库默认 `8765`，生产只读库默认 `8766`，路径都是 `/mcp`。端口可在 `.env` 用 `PG_TEST_MCP_PORT`、`PG_PROD_RO_MCP_PORT` 修改。按 `Ctrl+C` 一起停止；任一进程异常退出时，另一个也会停止。
@@ -43,6 +47,8 @@ PG_PROD_RO_DATABASE_URL=postgresql://prod_reader@replica.example.test:5432/asset
 仅配置一个环境就只启动该环境；两个变量都为空时回退到 `ASSETS_DATABASE_URL` 和 `PG_MCP_PORT`。如需忽略多环境配置并只启动这个单实例，运行 `uv run pg-mcp --single`。模板中的 `disabled` 仅控制 OpenCode 是否连接，不控制服务是否监听。**HTTP 服务没有应用层认证，只监听本机，不要代理或转发到其他机器。**
 
 `--single` 和 `--stdio` 优先使用显式的 `ASSETS_DATABASE_URL`，否则只回退到测试库。使用旧模板时，请将其中指向生产库的 `ASSETS_DATABASE_URL` 改成测试连接串或删除。多环境工作进程不加载 `.env`，只接收分配给自己的连接串。密码和 TLS 参数可以按环境在 libpq 连接配置中指定；工作进程不会继承通用 `PGPASSWORD`。
+
+升级已有多环境配置时，每个启用的环境必须补齐上述独立的预期库名、用户名。`--check`、开始监听前以及每次新建查询连接时均核对实际库名、用户和只读事务；不匹配不会执行业务 SQL。旧单实例可不配置；设置 `PG_MCP_EXPECTED_DATABASE` 和 `PG_MCP_EXPECTED_USER` 即启用同样校验。如果两套集群库名和用户名完全相同，这两项无法区分它们，应使用不同的专用角色。
 
 ## 工具
 
@@ -71,3 +77,5 @@ uv run --locked python -m unittest discover -s tests -v
 ```
 
 测试覆盖 SQL 校验、查询限制、错误脱敏，以及 HTTP 和 stdio 的 MCP 握手和工具调用。设置独立测试库连接串 `PG_MCP_TEST_DSN` 后，测试还会真实读取 PostgreSQL 系统表，并确认事务处于只读模式；未设置时该项跳过。
+
+双端口路由测试额外使用 `PG_MCP_TEST_SECOND_DSN`（须与第一个测试库名称不同），只应提供隔离的测试目标。也可在本机安装 PostgreSQL 后运行 `uv run --locked python tests/with_postgres.py`：它创建临时集群、两个库和两个只读角色，完成测试后清理。若 `initdb` 不在 PATH，用 `PG_MCP_TEST_PGBIN` 指定 PostgreSQL 的 `bin` 目录。

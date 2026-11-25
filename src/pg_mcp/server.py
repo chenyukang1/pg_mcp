@@ -18,6 +18,7 @@ from pydantic import Field
 
 from .database import connect_readonly, error_hint
 from .diagnostics import check_profiles, check_single
+from .identity import IDENTITY_SQL, ExpectedIdentity
 from .launcher import configured_profiles, read_port, run_profiles
 from .sql_validation import validate_select
 
@@ -71,6 +72,8 @@ def _read_connection() -> Iterator[psycopg.Connection]:
 
     try:
         with connect_readonly(dsn) as conn:
+            if expected := ExpectedIdentity.from_env("PG_MCP"):
+                expected.verify(conn.execute(IDENTITY_SQL).fetchone())
             yield conn
     except psycopg.errors.QueryCanceled:
         raise ToolError("PostgreSQL 查询超时。") from None
@@ -161,14 +164,12 @@ def main() -> None:
     load_dotenv(".env")
     if not os.environ.get("ASSETS_DATABASE_URL"):
         os.environ["ASSETS_DATABASE_URL"] = os.environ.get("PG_TEST_DATABASE_URL", "")
-    if args.stdio:
-        mcp.run(transport="stdio")
-        return
-
     try:
-        profiles = [] if args.single else configured_profiles()
+        profiles = [] if args.single or args.stdio else configured_profiles()
         if not profiles:
-            mcp.settings.port = read_port("PG_MCP_PORT", 8765)
+            expected = ExpectedIdentity.from_env("PG_MCP")
+            if not args.stdio:
+                mcp.settings.port = read_port("PG_MCP_PORT", 8765)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -179,4 +180,10 @@ def main() -> None:
         raise SystemExit(0 if ok else 1)
     if profiles:
         raise SystemExit(run_profiles(profiles))
-    mcp.run(transport="streamable-http")
+    if expected:
+        try:
+            with _read_connection():
+                pass  # 身份通过后才开始监听；工具每次新建连接时仍会再次校验。
+        except ToolError as exc:
+            parser.exit(1, f"{exc}\n")
+    mcp.run(transport="stdio" if args.stdio else "streamable-http")

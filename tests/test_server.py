@@ -189,7 +189,7 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
             sys.executable,
             "-c",
             "from pg_mcp import main; main()",
-            env={**os.environ, "PG_MCP_PORT": str(port), "ASSETS_DATABASE_URL": "",
+            env={**os.environ, "PG_MCP_PORT": str(port), "ASSETS_DATABASE_URL": "", "PYTHON_DOTENV_DISABLED": "1",
                  "PG_TEST_DATABASE_URL": "", "PG_PROD_RO_DATABASE_URL": ""},
         )
         try:
@@ -224,38 +224,3 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
                 except TimeoutError:
                     process.kill()
                     await process.wait()
-
-    async def test_one_command_starts_and_stops_both_profiles(self):
-        with socket.socket() as first, socket.socket() as second:
-            for sock in (first, second):
-                sock.bind(("127.0.0.1", 0))
-            ports = [sock.getsockname()[1] for sock in (first, second)]
-
-        env = {**os.environ, "PG_TEST_DATABASE_URL": "dbname=test",
-               "PG_PROD_RO_DATABASE_URL": "dbname=prod_readonly",
-               "PG_TEST_MCP_PORT": str(ports[0]), "PG_PROD_RO_MCP_PORT": str(ports[1])}
-        process = await asyncio.create_subprocess_exec(sys.executable, "-m", "pg_mcp", env=env)
-        try:
-            async with asyncio.timeout(15):
-                for port in ports:
-                    while True:
-                        self.assertIsNone(process.returncode)
-                        try:
-                            _, writer = await asyncio.open_connection("127.0.0.1", port)
-                        except ConnectionRefusedError:
-                            await asyncio.sleep(0.05)
-                        else:
-                            writer.close()
-                            await writer.wait_closed()
-                            break
-                    async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as streams:
-                        async with ClientSession(*streams[:2]) as session:
-                            await session.initialize()
-                            self.assertIn("query", [t.name for t in (await session.list_tools()).tools])
-        finally:
-            if process.returncode is None:
-                process.terminate()
-            await asyncio.wait_for(process.wait(), timeout=15)
-        for port in ports:
-            with self.assertRaises(ConnectionRefusedError):
-                await asyncio.open_connection("127.0.0.1", port)
